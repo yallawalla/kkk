@@ -1,0 +1,1113 @@
+!include            "remplus.h"
+!include            "remdspio.h"
+/***	RTC RAM backed variables ****************************/
+/*		shutdown_save() -> remmisc.c						*/
+/*															*/
+!global double		pitch
+!global double		roll
+!global int	        maxmils=6400	/* initial mils scale	*/
+!global int			corr=1			/* initial corr mode	*/
+/************************************************************/
+/* flash EE saved parameters 								*/
+/* SavePar() -> remio.c										*/
+!global	double		p_null			/* pitch offset			*/
+!global	double		r_null			/* roll offset			*/
+!global	double		p_scale =1e-6
+!global	double		r_scale =1e-6
+!global	double		cpr				/* pitch/roll align		*/
+!global double		crp
+!global int			el_null			/* RLD alignment/elev.	*/
+!global	double		Pscale          /* pitch				*/
+!global	double		Pnull	        /* coeff.				*/
+!global	double		Rscale          /* roll					*/
+!global	double		Rnull	        /* coeff.				*/
+!global	int			Tiltmode        /* Temp coeff select	*/
+!global int			pwoff           /* poweroff delay		*/
+!global int	        track_delay=60	/* predict. interval	*/
+!global int			GPS_dt          /* GMT offset, hours	*/
+!global int			GPS_pdop=6		/* GPS pdop				*/
+!global int			dGPS			/* dGPS rate			*/
+!global	int			tn_max=10390	/* scan values	at -20	*/
+!global	int			tn_min=6814		/*   ...	 	at 	55	*/
+!global double		t_ref=2.35e+5	/* ref. temp -> tilt	*/
+									/* head, mic, rx & tx	*/
+!global int			DSPgain[4]={2,2,2,5}
+!global int			key_delay=500	/* gain values, tx delay*/
+
+!global int			az_align		/* RLD alignment/azimuth*/
+!global int			el_align		/* RLD alignment/elevat.*/
+!global double	    az_off			/* az. offset			*/
+
+!global int			GPS_alt = 331
+!global long		GPS_lat =46L*3600L + 5L*60L
+!global long		GPS_lon =14L*3600L + 29L*60L
+!global	zone		*Zones,*ZoneId
+!global int			ZoneUndef,SouthFlag
+
+!global	char		userpass[]	="        "
+!global	char		syspass[]	="        "
+!global	char		ser_no[]	="        "
+
+!global int			heat_temp
+!global int			shaft
+
+!global int			meteo[8][8]
+!global int			meteo_A = 1
+!global	int			diff_GPS = 1
+
+!global int			GPS_datum=108	/* GPS map datum def.SLO*/
+!global int			GPS_geo			/* GPS geoid model		*/
+!global int			GPS_dx
+!global int			GPS_dy
+!global int			GPS_dz
+!global int			C100_decl			/* magn. declin.		*/
+!global double		aC100
+!global double		bC100
+!global double		cC100
+!global int			CM_off		=-183	/* grid format UTM			*/
+!global int			CM_sect		=6		/*						*/
+!global	long		FalseEast	=500000L
+!global	long		FalseNorth	=10000000L
+!global int			rld_mode			/* general rld port mode*/
+!global int			aux_mode    =1		/* default JW			*/
+!global int			lcd			=50
+!global int			swvers
+!global int			Backlit
+!global int			coordtx
+!global	int			language
+!global	int			RightToLeft
+/************************************************************/
+!global int	        d_mode		=EL_AZ_R    /* GLOBALS		*/
+!global int			edit_flag	=eof
+!global char        time_mode	=HOUR_MIN
+!global int			Tmax		=55.0		/*	max.temp	*/
+!global int			Tmin		=-20.0		/* 	min.temp	*/
+!global	int			shaft_data[2]
+!global double      maxgrid     =1e8		/*	9 digits	*/
+!global	double		SHtoR
+!global queue       *PIT_task
+!global queue       *RTC_task
+!global	int			wait_count	=50
+!global menu		*curr_menu;
+!global int			Key,PushKey,PushCount
+!global char        *error_screen[4],SophieBuff[50];
+!global char		LcdBuffer[82],LcdBackup[82],LcdExt[32]
+
+!global double      az_offset
+!global int			RTCMSize
+!global	long		temp
+
+!global	char		*library,*fonts,*syspar,eerror
+!global long		eebott,eetop
+!global lib         *LL,*Ln,*Lc,*Cn,*Sn,*NAV
+!global lib			*Lr,*LD,*LPP,*bll,*blll,*crest
+!global ltype 	    *LTYPES,*STYPES
+!global lib         *OBP,*ORG,*NORTH
+!global command		*CP,*CPM,*GUN,*SYS,*METEO,*LINK,*CPEXE
+!global	int			CountMode;
+!global RLD         rld
+!global GPS         gps
+!global	gun			*Guns
+
+!global int			lmenu_key
+!global mscan		*Mscan
+
+!global	double		GPSn_avrg
+!global	double		GPSdx_avrg
+!global	double		GPSdy_avrg
+!global	double		GPSdz_avrg
+
+!global char		RTCMLog[256]
+
+!global COMPASS     c100
+!global TCM2		tcm2
+
+!global	char		JwTx[16],JwRx[16],*Jw,Ibit,JwStat;
+!global	int			JwCount,JwCheck,JwAZ,JwEL,JwR;
+/*..........................................................*/
+!global	char		pass[]	="        "
+
+!global	int			r_filt[8],p_filt[8]
+!global int			r_off[8],p_off[8]
+!global	int			PITcnt
+!global	rtime		Time
+!global	double		Tamb=25
+
+!function           smenu
+
+!define root
+
+{
+LIBRARY|SEZNAM:library_on(&Ln)
+	{
+	ENTER|VPIS:InsertLib();
+	ERASE|BRISI
+		{
+		ALL|VSE:EraseAll(),ret(1);
+		SINGLE|POSAMIC:EraseSingle(),ret(1);
+		/;
+		CANCEL|IZHOD:ret(1);
+		};
+	/;
+	EXIT|IZHOD
+		{
+		SAVE|SHRANI:SaveEE(),ret(eof);
+		/;
+		/;
+		CANCEL|IZHOD:LoadEE(),ret(eof);
+		};
+	@up:NextList(&Ln);
+	@down:LastList(&Ln);
+	@left:LastType(&Ln);
+	@right:NextType(&Ln);
+	@enter:EditX(),s_menu_hold(edit_x);
+	@alpha:s_menu_hold(mode);
+	@clear:InitObject();
+	};
+SURVEY|TOPOGRF:clear_screen(),PushMode()
+	{
+	POSITION|POLOZAJ:MakePos()
+		{
+		LIBRARY|SEZNAM:toLL(&Ln)
+			{
+			SELECT|IZBERI:toLL(&Ln),ret(1);
+			/;
+			/;
+			CANCEL|IZHOD:toLL(&OBP),ret(1);
+			@up:NextList(&Ln);
+			@down:LastList(&Ln);
+			@left:LastType(&Ln);
+			@right:NextType(&Ln);
+			};
+		GPS|GPS:CheckImpl(HW_GPS),GpsFixInit(),RLD_disable()
+			{
+			ENTER|VPIS:GpsFixClose(),RLD_enable(),ret(1);
+			DGPS|DGPS:CheckImpl(HW_DGPS),UpdateRtcm();
+			/:CheckPass(&syspass),AlignEcef();
+			CANCEL|IZHOD:GpsFixClose(),RLD_enable(),MakePos(),ret(1);
+			@alpha:GpsFixMode();
+			@clear:SetGpsRef();
+			@enter:CheckPass(&syspass),GpsStatus();
+			};
+		ENTER|VPIS:UpdatePost(),SaveEE(),close_srv(),ret(eof);
+		CANCEL|IZHOD:LoadEE(),close_srv(),ret(eof);
+		@left:last_xyz();
+		@right:next_xyz();
+		@enter:EditX(),s_menu_hold(edit_x);
+		};
+	NORTH|SEVER:MakeNorth()
+		{
+		LIBRARY|SEZNAM:toLL(&Ln)
+			{
+			SELECT|IZBERI:toLL(&Ln),ret(1);
+			/;
+			/;
+			CANCEL|IZHOD:MakeNorth(),ret(1);
+			@up:NextList(&Ln);
+			@down:LastList(&Ln);
+			@left:LastType(&Ln);
+			@right:NextType(&Ln);
+			};
+		COMPASS|KOMPAS:C100_enable(),RLD_disable()
+			{
+			ENTER|VPIS:C100_disable(),RLD_enable(),ret(1);
+			/;
+			/;
+			CANCEL|IZHOD:C100_disable(),RLD_enable(),MakeNorth(),ret(1);
+			@alpha:s_menu_hold(cal);
+			@clear:CheckPass(&syspass),InitKVH();
+			};
+		ENTER|VPIS:ComputeNorth(),UpdateNorth(),SaveEE(),close_srv(),ret(eof);
+		CANCEL|IZHOD:LoadEE(),close_srv(),ret(eof);
+		@left:last_xyz();
+		@right:next_xyz();
+		@enter:EditX(),s_menu_hold(edit_x);
+		};
+	COMPUTE|IZRACUN
+		{
+		1_POINT|1_TOCKA:MakeTraverse()
+			{
+			LIBRARY|SEZNAM:toLL(&Ln)
+				{
+				SELECT|IZBERI:LLtoSn(),ret(1);
+				/;
+				/;
+				CANCEL|IZHOD:SntoLL(),ret(1);
+				@up:NextList(&Ln);
+				@down:LastList(&Ln);
+				@left:LastType(&Ln);
+				@right:NextType(&Ln);
+				@enter:EditX(),s_menu_hold(edit_x);
+				};
+			COMPUTE|IZRACUN:LLtoSn(),traverse()
+				{
+				ENTER|VPIS:UpdatePost(),SaveEE(),close_srv(),ret(eof);
+				/;
+				/;
+				CANCEL|IZHOD:LoadEE(),SntoLL(),ret(1);
+				};
+			/;
+			CANCEL|IZHOD:close_srv(),ret(eof);
+			@up:LLtoSn(),NextList(&Sn);
+			@down:LLtoSn(),LastList(&Sn);
+			@left:LLtoSn(),LastType(&Sn);
+			@right:LLtoSn(),NextType(&Sn);
+			@enter:EditX(),s_menu_hold(edit_x);
+			};
+		2_POINT|2_TOCKI:MakeTrilat()
+			{
+			LIBRARY|SEZNAM:toLL(&Ln)
+				{
+				SELECT|IZBERI:LLtoSn(),ret(1);
+				/;
+				/;
+				CANCEL|IZHOD:SntoLL(),ret(1);
+				@up:NextList(&Ln);
+				@down:LastList(&Ln);
+				@left:LastType(&Ln);
+				@right:NextType(&Ln);
+				@enter:EditX(),s_menu_hold(edit_x);
+				};
+			COMPUTE|IZRACUN:LLtoSn(),trilaterate()
+				{
+				ENTER|VPIS:UpdatePost(),UpdateNorth(),SaveEE(),close_srv(),ret(eof);
+				/;
+				/;
+				CANCEL|IZHOD:LoadEE(),SntoLL(),ret(1);
+				};
+			/;
+			CANCEL|IZHOD:close_srv(),ret(eof);
+			@up:LLtoSn(),NextList(&Sn);
+			@down:LLtoSn(),LastList(&Sn);
+			@left:LLtoSn(),LastType(&Sn);
+			@right:LLtoSn(),NextType(&Sn);
+			@enter:EditX(),s_menu_hold(edit_x);
+			};
+		3_POINT|3_TOCKE:MakeTriang()
+			{
+			LIBRARY|SEZNAM:toLL(&Ln)
+				{
+				SELECT|IZBERI:LLtoSn(),ret(1);
+				/;
+				/;
+				CANCEL|IZHOD:SntoLL(),ret(1);
+				@up:NextList(&Ln);
+				@down:LastList(&Ln);
+				@left:LastType(&Ln);
+				@right:NextType(&Ln);
+				@enter:EditX(),s_menu_hold(edit_x);
+				};
+			COMPUTE|IZRACUN:LLtoSn(),triangulate()
+				{
+				ENTER|VPIS:UpdatePost(),UpdateNorth(),SaveEE(),close_srv(),ret(eof);
+				/;
+				/;
+				CANCEL|IZHOD:LoadEE(),SntoLL(),ret(1);
+				};
+			/;
+			CANCEL|IZHOD:close_srv(),ret(eof);
+			@up:LLtoSn(),NextList(&Sn);
+			@down:LLtoSn(),LastList(&Sn);
+			@left:LLtoSn(),LastType(&Sn);
+			@right:LLtoSn(),NextType(&Sn);
+			@enter:EditX(),s_menu_hold(edit_x);
+			};
+		CANCEL|IZHOD:close_srv(),ret(eof);
+		};
+	CANCEL|IZHOD:ret(eof);
+	};
+SETUP|OPCIJE:clear_screen(),RLD_disable()
+	{
+	SYSTEM|SISTEM:comm_enable(&SYS),l_menu_hold(set_system)
+		{
+		SAVE|SHRANI:SaveEE(),ret(2);
+		/;
+		/;
+		CANCEL|IZHOD:LoadEE(),ret(2);
+		};
+	LEVEL|NIVO:InitLevel()
+		{
+		ENABLE|VKLOP:EnableLevel(),CloseLevel(),ret(2);
+		DISABLE|IZKLOP:DisableLevel(),CloseLevel(),ret(2);
+		/;
+		CANCEL|IZHOD:CloseLevel(),shutdown_load(),ret(2);
+		@default:CheckPass(&syspass),ResetLevel();
+		};
+	GUN|OROZJE:CheckImpl(SW_V1),list_on(&GUN)
+		{
+		CALL|PRENOS:CallGun(&GUN),list_on(&GUN);
+		ACKN|POTRDI:Ack(&GUN);
+		SAVE|SHRANI:SaveEE(),ret(2);
+		CANCEL|IZHOD:LoadEE(),ret(2);
+		@right:next_status(&GUN),list_on(&GUN);
+		@left:last_status(&GUN),list_on(&GUN);
+		@up:NextList(&Cn),list_on(&GUN);
+		@down:LastList(&Cn),list_on(&GUN);
+		@enter:comm_enable(&GUN),RLD_enable(),l_menu_hold(edit_gun),list_on(&GUN),RLD_disable();
+		@default:list_on(&GUN);
+		};
+	METEO|METEO:CheckImpl(SW_V1)
+		{
+		UPDATE|POZIV:UpdateMeteo();
+		/;
+		SAVE|SHRANI:SaveEE(),ret(2);
+		CANCEL|IZHOD:LoadEE(),ret(2);
+		@enter:comm_enable(&METEO),l_menu_hold(set_meteo);
+		@clear:InitMeteo();
+		};
+	@enter:CheckPass(&syspass),comm_enable(&LINK),l_menu_hold(SetupMenu)
+		{
+		save|shrani:SaveEE(),ret(2);
+		/;
+		/;
+		cancel|izhod:LoadEE(),ret(2);
+		};
+	@alpha:CheckPass(&syspass),MenuView();
+	},shutdown_save(),RLD_enable(),ret(1);
+
+MESSAGE|POVELJE:CheckImpl(SW_V1),RLD_disable(),list_on(&CP)
+		{
+		DEFINE|DOLOCI
+			{
+			TARGET|CILJ:TargetToLL(&CP),RLD_enable()
+				{
+				UPDATE|POZIV:UpdateTarget(&CP);
+				/;
+				ENTER|VPIS:TargetFromLL(&CP),RLD_disable(),list_on(&CP),ret(2);
+				CANCEL|IZHOD:list_on(&CP),RLD_disable(),ret(2);
+				@up:NextList(&Cn);
+				@down:LastList(&Cn);
+				@clear:InitTarget();
+				@enter:EditX(),s_menu_hold(edit_x);
+				@alpha:s_menu_hold(mode);
+				@default:SelectTargetType();
+				};
+			CORRECT|ODKLON:PushMode(),CorrToLL(&CP),RLD_enable()
+				{
+				MODE|REZIM
+					{
+					DEFAULT|NORMAL:SetDGrid(),ret(1);
+					\x86Vo|\x86Vo:SetDMuzz(),ret(1);
+					SAVE|SHRANI:SaveCorr(&CP),ret(1);
+					CANCEL|IZHOD:ret(1);
+					},list_on(&CP),RLD_disable(),PullMode(),ret(2);
+				/;
+				ENTER|VPIS:CorrFromLL(&CP),list_on(&CP),RLD_disable(),PullMode(),ret(2);
+				CANCEL|IZHOD:list_on(&CP),RLD_disable(),PullMode(),ret(2);
+				@enter:EditX(),s_menu_hold(edit_x);
+				@clear:InitCorr();
+				@alpha:s_menu_hold(mode);
+				};
+			UNIT|ENOTA:UnitToLL(&CP),RLD_enable()
+				{
+				UPDATE|POZIV:UpdateUnit();
+				/;
+				ENTER|VPIS:UnitFromLL(&CP),list_on(&CP),RLD_disable(),ret(2);
+				CANCEL|IZHOD:list_on(&CP),RLD_disable(),ret(2);
+				@up:NextList(&Cn);
+				@down:LastList(&Cn);
+				@clear:InitUnit();
+				@enter:EditX(),s_menu_hold(edit_x);
+				@alpha:s_menu_hold(mode);
+				@default:SelectUnitType();
+				};
+			CANCEL|IZHOD:ret(1);
+			};
+		CALL|PRENOS
+			{
+			COMMAND|POVELJE:Call(&CP),list_on(&CP),ret(1);
+			ABORT|PREKINI:CommandAbort(&CP),list_on(&CP),ret(1);
+			ACK|POTRDI
+				{
+				YES|DA:Ack(&CP),ret(2);
+				NO|NE:Nack(&CP),ret(2);
+				/;
+				CANCEL|IZHOD:ret(2);
+				},list_on(&CP);
+			CANCEL|IZHOD:ret(1);
+			},list_on(&CP);
+		COMPUTE|IZRACUN:CheckTarget(&CP),CalcTarget(&CP),DisplBallist(&CP)
+			{
+			ACKN|POTRDI:Ack(&CP);
+			NOTACK|ZAVRNI:Nack(&CP);
+			/;
+			EXIT|IZHOD:list_on(&CP),ret(1);
+			@right:NextTarget(&CP),DisplBallist(&CP);
+			@left:LastTarget(&CP),DisplBallist(&CP);
+			@down:LastPredict(&CP),CalcTarget(&CP),DisplBallist(&CP);
+			@up:NextPredict(&CP),CalcTarget(&CP),DisplBallist(&CP);
+			@GXM_MESSAGE_ID:list_on(&CP),CheckTarget(&CP),CalcTarget(&CP),DisplBallist(&CP);	
+			@alpha:SwitchPage();
+			};
+		EXIT|IZHOD:SaveEE(),RLD_enable(),ret(1);
+		@clear:CheckPass(syspass),InitBallistic(&CP);
+		@up:next_command(&CP),list_on(&CP);
+		@down:last_command(&CP),list_on(&CP);
+		@right:next_status(&CP),list_on(&CP);
+		@left:last_status(&CP),list_on(&CP);
+		@enter:comm_enable(&CP),l_menu_hold(Cedit),list_on(&CP);
+		@alpha
+			{
+			new|dodaj:CommandCopy(&CP),list_on(&CP),ret(1);
+			erase|brisi
+				{
+				all|vse:EraseCommand(),list_on(&CP),ret(2);
+				single|posamic:EraseCommand(&CP),list_on(&CP),ret(2);
+				/;
+				cancel|izhod:ret(2);
+				};
+			/;
+			cancel|izhod:ret(1);
+			@alpha:ret(1);
+			};
+		@default:list_on(&CP);
+		};
+@enter:EditX(),s_menu_hold(edit_x);
+@alpha:s_menu_hold(mode);
+@left:SelectLeft();
+@clear:InitObject();
+@right:SelectRight();
+@default:NumObj();
+@GXM_MESSAGE_ID:CheckExe(&CP),s_menu_hold(dm_exe);
+@GXM_GUN_ID:CheckExe(&GUN),s_menu_hold(dm_exe);
+};
+/**********************************************************/
+
+!define dm_exe
+
+{
+ACKN|POTRDI:Ack();
+NOTACK|ZAVRNI:Nack();
+/;
+EXIT|IZHOD:list_on(&CP),SaveEE(),RLD_enable(),ret(1);
+@alpha:SwitchPage();
+@GXM_MESSAGE_ID:list_on(&CP),CheckTarget(&CP),CalcTarget(&CP),DisplBallist(&CP);
+@GXM_GUN_ID:list_on(&GUN),DisplBallist(&GUN);
+@default:list_on(&CPEXE);};
+/**********************************************************/
+
+!define    edit_x
+
+{
+next|nasld:EditClose(),next_xyz(),EditX();
+prev|predh:EditClose(),last_xyz(),EditX();
+new|nova:EditClose(),add_xyz(),EditX();
+erase|brisi:EditClose()
+	 {
+	 single|posamic:erase_xyz_s(),ret(1);
+	 all|vse:erase_xyz_all(),ret(1);
+	 /;
+	 cancel|izhod:ret(1);
+	 },EditX();
+@down:EditY(),s_menu(edit_y);
+@left:EditUtm(),s_menu(edit_utm);
+@right:EditClose(),EditTL(),s_menu(edit_time_l);
+@alpha:EditClose(),s_menu_hold(mode),EditX();
+@GXM_CURSOR_POS:EditRefresh();
+@enter:EditClose(),ret(eof);
+@default:EditX();
+};
+
+/************************************************************/
+
+!define   edit_y
+
+{
+next|nasld:EditClose(),next_xyz(),EditY();
+prev|predh:EditClose(),last_xyz(),EditY();
+new|nova:EditClose(),add_xyz(),EditY();
+erase|brisi:EditClose()
+	 {
+	 single|posamic:erase_xyz_s(),ret(1);
+	 all|vse:erase_xyz_all(),ret(1);
+	 /;
+	 cancel|izhod:ret(1);
+	 },EditY();
+@up:EditX(),s_menu(edit_x);
+@down:EditZ(),s_menu(edit_z);
+@right:EditClose(),EditType(),s_menu(edit_type);
+@alpha:EditClose(),s_menu_hold(mode),EditY();
+@GXM_CURSOR_POS:EditRefresh();
+@enter:EditClose(),ret(eof);
+@default:EditY();
+};
+
+/************************************************************/
+
+!define   edit_z
+
+{
+next|nasld:EditClose(),next_xyz(),EditZ();
+prev|predh:EditClose(),last_xyz(),EditZ();
+new|nova:EditClose(),add_xyz(),EditZ();
+erase|brisi:EditClose()
+	 {
+	 single|posamic:erase_xyz_s(),ret(1);
+	 all|vse:erase_xyz_all(),ret(1);
+	 /;
+	 cancel|izhod:ret(1);
+	 },EditZ();
+@up:EditY(),s_menu(edit_y);
+@down:EditClose(),EditTxt(),s_menu(edit_txt);
+@alpha:EditClose(),s_menu_hold(mode),EditZ();
+@GXM_CURSOR_POS:EditRefresh();
+@enter:EditClose(),ret(eof);
+@default:EditZ();
+};
+/************************************************************/
+
+!define edit_time_l
+
+{
+select|oblika:mode_time();
++|+:incr_time_l();
+-|-:decr_time_l();
+current|tekoci:set_time();
+@down:EditType(),s_menu(edit_type);
+@left:EditX(),s_menu(edit_x);
+@right:EditTR(),s_menu(edit_time_r);
+@alpha:s_menu_hold(mode);
+@GXM_CURSOR_POS:EditRefresh();
+@enter:EditClose(),ret(eof);
+};
+
+/************************************************************/
+
+!define edit_time_r
+
+{
+select|oblika:mode_time();
++|+:incr_time_r();
+-|-:decr_time_r();
+current|tekoci:set_time();
+@down:EditType(),s_menu(edit_type);
+@left:EditTL(),s_menu(edit_time_l);
+@alpha:s_menu_hold(mode);
+@GXM_CURSOR_POS:EditRefresh();
+@enter:EditClose(),ret(eof);
+};
+
+/************************************************************/
+
+!define   edit_txt
+
+{
+next|nasld:sel_txt_r();
+prev|predh:sel_txt_l();
+new|nov:add_txt();
+/;
+@up:EditZ(),s_menu(edit_z);
+@GXM_CURSOR_POS:EditRefresh();
+@enter:EditClose(),ret(eof);
+@default:EditTxt();
+};
+
+/************************************************************/
+
+!define   edit_type
+
+{
+select|izbira:select_type();
+find|poisci:find_ntyp();
+enum|num.:auto_ntyp();
+/;
+@up:EditTL(),s_menu(edit_time_l);
+@down:EditZ(),s_menu(edit_z);
+@left:EditY(),s_menu(edit_y);
+@alpha:s_menu_hold(mode);
+@GXM_CURSOR_POS:EditRefresh();
+@enter:EditClose(),ret(eof);
+@default:EditType();
+};
+
+/************************************************************/
+
+!define mode
+
+{
+coord|koord
+	 {
+	 polar|polar:set_EL_AZ_R(),rewrite_LCD(),ret(eof);
+	 cylind|cilind:set_AZ_R_dZ(),rewrite_LCD(),ret(eof);
+	 xyz|xyz:set_N_E_Z(),rewrite_LCD(),ret(eof);
+	 map|topogrf:origin_local(),rewrite_LCD(),ret(eof);
+	 @alpha:ret(eof);
+	 };
+origin|zacetek
+	{
+	local|lokalno:origin_local(&OBP),rewrite_LCD(),ret(eof);
+	library|seznam:toLL(&Ln)
+		{
+		enter|vpis:origin_local(&Ln),rewrite_LCD(),ret(eof);
+		/;
+		/;
+		cancel|izhod:rewrite_LCD(),ret(2);
+		@up:NextList(&Ln);
+		@down:LastList(&Ln);
+		@left:LastType(&Ln);
+		@right:NextType(&Ln);
+		@alpha:ret(eof);
+		};
+	/;
+	enter|vpis:origin_local(&LL),rewrite_LCD(),ret(eof);
+	@alpha:ret(eof);
+	};
+bearing|smer
+	{
+	north|sever:bearing_local(),rewrite_LCD(),ret(eof);
+	library|seznam:toLL(&Ln)
+		{
+		enter|vpis:bearing_local(&Ln),rewrite_LCD(),ret(eof);
+		/;
+		/;
+		cancel|izhod:rewrite_LCD(),ret(2);
+		@up:NextList(&Ln);
+		@down:LastList(&Ln);
+		@left:LastType(&Ln);
+		@right:NextType(&Ln);
+		@alpha:ret(eof);
+		};
+	freerun|iskanje:point_on()
+		{
+		exit|izhod:point_off(),ret(eof);
+		/;
+		/;
+		/;
+		@alpha:point_off(),ret(eof);
+		};
+	enter|vpis:bearing_local(&LL),rewrite_LCD(),ret(eof);
+	@alpha:ret(eof);
+	};
+mils|tisocin
+	  {
+	  6000|6000:set_mils6000(),rewrite_LCD(),ret(eof);
+	  6400|6400:set_mils6400(),rewrite_LCD(),ret(eof);
+	  /;
+	  /;
+	  };
+@alpha:ret(eof);
+};
+
+
+/************************************************************/
+
+!define cal
+
+{
+field|krog:Init8pt()
+	{
+	0\xb0|0\xb0:Enter8pt() {
+		45\xb0|45\xb0:Enter8pt() {
+			90\xb0|90\xb0:Enter8pt() {
+				135\xb0|135\xb0:Enter8pt() {
+					180\xb0|180\xb0:Enter8pt() {
+						225\xb0|225\xb0:Enter8pt() {
+							270\xb0|270\xb0:Enter8pt() {
+								315\xb0|315\xb0:Enter8pt(),ret(eof);
+								/;
+								/;
+								cancel|prekini:AbortKVHcal(),ret(eof);
+								};
+							/;
+							/;
+							cancel|prekini:AbortKVHcal(),ret(eof);
+							};
+						/;
+						/;
+						cancel|prekini:AbortKVHcal(),ret(eof);
+						};
+					/;
+					/;
+					cancel|prekini:AbortKVHcal(),ret(eof);
+					};
+				/;
+				/;
+				cancel|prekini:AbortKVHcal(),ret(eof);
+				};
+			/;
+			/;
+			cancel|prekini:AbortKVHcal(),ret(eof);
+			};
+		/;
+		/;
+		cancel|prekini:AbortKVHcal(),ret(eof);
+		};
+	/;
+	/;
+	cancel|prekini:AbortKVHcal(),ret(eof);
+	};
+3-ref|3-ref:Init3pt() {
+	0\xb0|0\xb0:Enter3pt() {
+		120\xb0|120\xb0:Enter3pt() {
+			240\xb0|240\xb0:Enter3pt(),ret(eof);
+			/;
+			/;
+			cancel|prekini:AbortKVHcal(),ret(eof);
+			};
+		/;
+		/;
+		cancel|prekini:AbortKVHcal(),ret(eof);
+		};
+	/;
+	/;
+	cancel|prekini:AbortKVHcal(),ret(eof);
+	};
+/;
+cancel|prekini:ret(1);
+@enter:CheckPass(&syspass),C100align();
+@sign:CheckPass(&syspass),C100sign();
+@clear:CheckPass(&syspass),C100clear();
+@alpha:ret(1);
+};
+
+
+/************************************************************/
+
+!function lmenu
+
+!define set_system
+{
+[setup|nastavi]
+SYSTEM|SISTEM
+		{ [ser.no.|ser.st   ] / :SetSerial(&ser_no);},
+		{ [timeout|izklop   ] / :ReadPwoff(&pwoff);},
+		{ [track|interv.    ] / :ReadTrack(&track_delay);},
+		{ [passwrd|geslo    ] / :SetPass(&userpass);},
+		{ [service|servis   ] / :SetPass(&syspass);},
+		{ [screen|osvetl    ] / :SetScreen();};
+TIME|CAS
+		{ [time|ura         ] / :SetTime();},
+		{ [date|datum       ] / :SetDate();},
+		{ [GMT_\x86t|GMT_\x86t] / :ReadGpsoff(&GPS_dt);};
+GPS|GPS
+		{ [station|postaja] / :DiffGps();},
+		{ [alt|visina ] / :ReadGpsoff(&GPS_alt);},
+		{ [lat|sirina ] / :ReadGpsLat();},
+		{ [lon|dolzina] / :ReadGpsLon();},
+		{ [decl.|deklin     ] / :ReadDecl();},
+		{ [\x86grid|\x86merid.] / :ShowDgrid();};
+};
+
+
+!define SetupMenu
+
+{
+[setup|izbira]
+LEVEL|NIVO
+	{[___|___        ] / :ShowEncoder();},
+	{[pitch|pitch    ] / :ShowPitch();},
+	{[roll|roll]       / :ShowRoll();},
+	{[Toffset|Toffset] / :ToffTilt();},
+	{[Tscale|Tscale  ] / :TscaleTilt();},
+	{[temp|temp      ] / :ShowTemp();};
+GPS|GPS
+	{[datum|datum    ] / :SelDatum();},
+	{[geoid|geoid    ] / :SelGeoid();},
+	{[dx|dx          ]	/:GeoOffset(&GPS_dx);},
+	{[dy|dy          ]	/:GeoOffset(&GPS_dy);},
+	{[dz|dz          ]	/:GeoOffset(&GPS_dz);},
+	{[PDOP|PDOP   ]		/:ReadPdop();},
+	{[mode|rezim  ] 
+		off|izklop        :GPS_pmode();
+		switched|vklop    :GPS_pmode();
+		continous|neprek. :GPS_pmode();
+	},
+	{[dGPS|dGPS   ] 	off|izklop:GPS_dmode();
+				        on|vklop :GPS_dmode();
+	};
+MAP|KARTA
+	{[sector|sektor] / :EnterInt(&CM_sect);},
+	{[offset|premik] / :EnterInt(&CM_off);},
+	{[North|Sever  ] / :EnterLong(&FalseNorth);},
+	{[East|Vzhod   ] / :EnterLong(&FalseEast);};
+LINK|PRENOS
+	{[delay|zakasn.] / :EnterInt(&key_delay);},
+	{[mic|mikr.    ] / :SetDSPgain(0);},
+	{[head|slus.   ] / :SetDSPgain(1);},
+	{[input|vhod   ] / :SetDSPgain(2);},
+	{[output|izhod ] / :SetDSPgain(3);};
+SYSTEM|SISTEM
+	{[aux|aux   ]
+		NONE|IZKLOP:	EnterOpt(&aux_mode);
+		MORS|MORS:		EnterOpt(&aux_mode);
+		DGPS|DGPS:		EnterOpt(&aux_mode),
+			{[rate|hitrost] / :ReadDgps();
+			};
+		},
+	{[Version|Verzija]	/:EnterInt(&swvers);},
+	{[coord|koord]
+		LATLON|LATLON:EnterOpt(&coordtx);
+		MAP|TOPOGRF:EnterOpt(&coordtx);
+	},
+	{[rld_T2|rld_T2]
+		tg_2|cilj_2		:RLD_tmode();
+		tg_new|novi_cilj:RLD_tmode();
+	},
+	{[ENGLISH|SLO] / :SetLanguage();},
+	{[Sophie|Sophie]
+		off|izklop		:RLD_irmode();
+		on|vklop		:RLD_irmode();
+	};
+};
+
+!define set_meteo
+		{
+		[station|postaja]
+		/ :EditMeteo(),
+				{ [alt|visina     ] / :SetHeight(&METEO);},
+				{ [air___T|temp   ] / :AirTemp(&METEO);},
+				{ [air___P|pritisk]	/ :AirPress(&METEO);},
+				{ [rel___H|vlaga  ]	/ :AirHum(&METEO);},
+				{ [wind_SP|veter  ] / :WindSpeed(&METEO);},
+				{ [wind_AZ|smer   ]	/ :WindDir(&METEO);};
+		};
+
+!global int		comm_par[4]
+
+!define	Cedit
+
+	{
+    [___|___]
+    FIRE_REQUEST|ZAHTEVA:ShowTg()
+		{[effect|ucinek  ] / :EnterEffect(&CP);  },
+		{[fire|ogenj     ] / :EnterFiretime(&CP);};
+
+	ENGAGEMENT|IZVRSITEV:ShowTg()
+		{[guns|enota     ] / :EnterSect(&CP);    },
+		{[proj.|proj.    ] / :EnterProj(&CP);    },
+		{[fuze|vzig.     ] / :EnterFuze(&CP);    },
+		{[charge|poln.   ] / :EnterCharge(&CP);  },
+		{[rounds|strel.  ] / :EnterRounds(&CP);  },
+		{[interv.|interv.] / :EnterInterval(&CP);},
+		{[traj.|traj.    ] / :EnterTraj(&CP);    },
+		{[fire|ogenj     ] / :EnterFiretime(&CP);};
+    };
+/************************************************************/
+!define	edit_gun
+
+{
+[unit|enota]
+/ :EditGun()
+	{[azimuth|os.smer]  / :SetRefDir();},
+	{[bearing|kotomer] 	/ :SetGunref();},
+	{[gun|orozje     ]	/ :SetGun();},
+	{[proj.|proj.    ]	/ :SetAmm();},
+	{[pcs.|kos       ] 	/ :SetPcs();},
+	{[\x86m|\x86m      ] 	/ :SetMass();},
+	{[\x86Tp|\x86Ts    ] 	/ :PowderT();},
+	{[\x86Vo|\x86Vo    ] 	/ :SetMuzzle();};
+};
+
+
+!define EnterPasswrd
+
+		{ [passwrd|geslo    ] / :EnterPass();};
+
+!function           smenu
+!define edit_utm
+
+{
+north|sever:UtmNorth();
+south|jug:UtmSouth();
+east|vzhod:UtmEast();
+west|zahod:UtmWest();
+@right:EditX(),s_menu(edit_x);
+@enter:EditClose(),ret(eof);
+};
+
+
+!message	WARNING_P		"*** WARNING|*** OPOZORILO"
+!message	ERROR_P			"*** ERROR|*** NAPAKA"
+
+!message	W_ORG_REP		"origin modified|sprememba izhodisca"
+!message	W_OBP_REP		"obs.post modified|sprememba pozicije"
+!message	W_NORTH_REP		"north modified|sprememba odklona"
+!message	W_LIB_EMPTY		"library empty|prazen seznam"
+!message	W_SINGLE_ITEM	"single item|samo en objekt"
+!message	W_ITEM_N_FOUND	"item not found|ni v seznamu"
+!message	W_DGPS_OFF		"DGPS off|DGPS izkljucen"
+!message	W_LOW_BATT		"low battery|slaba baterija"
+!message	W_FTIME_ELAPSE	"fire time elapsed|cas ze potekel"
+!message 	W_RLD_NOMULTG	"no target|ni cilja"
+!message	W_CHARGE_MODF	"charge modified|sprememba polnenja"
+!message	W_RLD_MULTG		"multiple targets|vec ciljev"
+!message	W_RLD_BLOCTG	"target blocked|blokiran cilj"
+
+!message	E_OBP_DATA		"obs. post data|lastna pozicija"
+!message	E_ORG_DATA		"origin data|koord. izhodisce"
+!message	E_NORTH_DATA	"north data|tocka korekcije"
+!message	E_VOID_DATA		"void data|ni koordinat"
+!message	E_ILL_DATA		"illegal data|napacne koordinate"
+!message	E_VOID_TYPE		"void type|manjka tip objekta"
+!message	E_VOID_LIST		"void list|prazen seznam"
+!message	E_LIB_FULL		"library full|poln seznam"  ???
+!message	E_RLD_OFF		"laser not allowed|laser ni dovoljen"
+!message	E_RLD_N_READY	"laser not ready|laser ni pripravljen"
+!message	E_NORTH_ORG		"north eq. origin|ref. enaka izhodiscu"
+!message	E_MAX_VAL		"max.value exceeded|prevelika vrednost"
+!message	E_EMPTY_LIST	"list empty|prazen list"
+!message	E_NO_TARGET		"no target data|cilj ni izbran"
+!message	E_NO_STATION	"no station data|postaja ni izbrana"
+!message	E_NO_UNIT		"no unit data|enota ni izbrana"
+!message	E_GUN_NOTACT	"gun not selected|orozje ni izbrano"
+!message	E_COMM_PEND		"command pending|ukaz ni potrjen" ???
+!message	E_ITEMR01		"illegal r-01|r-01 ni vpisan"
+!message	E_ITEMR02		"illegal r-02|r-02 ni vpisan"
+!message	E_ITEMR03		"illegal r-03|r-03 ni vpisan"
+!message	E_ITEMM01		"illegal m-01|m-01 ni vpisan"
+!message	E_ITEMM02		"illegal m-02|m-02 ni vpisan"
+!message	E_ITEMB01		"illegal b-01|b-01 ni vpisan"
+!message	E_ITEMB02		"illegal b-02|b-02 ni vpisan"
+!message	E_ITEMB03		"illegal b-03|b-03 ni vpisan"
+!message	E_NOCOMM		"no command|ukaza ni v seznamu" ???
+!message	E_LINKBUSY		"link busy|linija zasedena"
+!message	E_ENDLIST		"end of list|konec seznama"
+!message	E_GPS			"GPS error|GPS v okvari"
+!message	E_NOT_BT		"BT type required|vpisi BT objekt"
+!message	E_NOT_TG		"TG type required|vpisi TG objekt"
+!message	E_NOT_MT		"MT type required|vpisi MT objekt"
+!message	E_NOT_MTG		"TG or MT required|vpisi MT ali TG"
+!message	E_1PT_ALLW		"1 point only|najvec 1 tocka"
+!message	E_3PT_ALLW		"3 points only|najvec 3 tocke"
+!message	E_8PT_ALLW		"8 points only|najvec 8 tock"
+!message	E_FIX_FTIME		"fire time fixed|cas ze dolocen"
+!message	E_ILL_PASS		"ill. password|napacno geslo"
+!message	E_TARG_OVERR	"out of range|cilj predalec"
+!message	E_TARG_UNDERR	"too close|cilj preblizu"
+!message	E_TARG_OUTR	 	" out of range|cilj izven dosega"
+!message	E_M01EQM02		"m-01 equal m-02|m-01 je enak m-02"
+!message	E_R01EQR02		"r-01 equal r-02|r-01 je enak r-02"
+!message	E_USED_BY		"list no. |ukaz st. "
+!message	E_CREST			"crest|ovira"
+
+!message	M_OBP_DATA		"obs. post data|lastna pozicija"
+!message	M_OBJ_DEL		"object erased|objekt izbrisan"
+!message	M_OBJ_INS		"object inserted|objekt vpisan"
+!message	M_OBJ_REP		"object modified|objekt spremenjen"
+!message	M_NUM_ON		"numeric|stevilke"
+!message	M_UPP_ON		"letters|crke"
+!message	M_LOW_ON		"lower case|male crke"
+!message	M_LIST_UPDAT	"list updated|novo sporocilo"
+!message	M_GUN_UPDAT		"gun updated|nova priprava"
+!message	M_COMM_READY	"command ready|priprava konec"
+!message	M_COMM_END		"command finished|povelje koncano"
+!message	M_COMM_REJ		"command rejected|povelje zavrni"
+!message	M_COMM_ABORT	"command aborted|povelje prekini"
+!message	M_LASER_ON		"laser on|laser vklop"
+!message	M_LASER_OFF		"laser off|laser izklop"
+!message	M_METEO_INI		"init. meteo|zacetni pogoji" ???
+!message	M_METEO_UPDT	"meteo updated|nov bilten"
+!message	M_WAITING		"wait|pocakaj" ???
+!message	M_SAVE_LIB		"saving library|vpis seznama"
+!message	M_LOAD_LIB		"reload library|stari seznam"
+
+!message	CO_UNDEF		"batt.HQ|poveljnik"
+!message	BT_UNDEF		"battery|baterija"
+!message	TG_UNDEF		"undefined|cilj/nedef."
+
+!message	RP_UNDEF		"ref.point|ref.tocka"
+!message	OP_UNDEF		"obs.post|opazovalec"
+!message	CR_UNDEF		"crest|ovire"
+
+!message	INF_HQ			"inf.HQ|pov.pehota"
+!message	ART_HQ			"art.HQ|pov.topovi"
+!message	ARM_HQ			"arm.HQ|pov.oklep"
+
+!message	TG_INF			"infantry|pehota"
+!message	TG_ART			"artillery|topovi"
+!message	TG_ARM			"armour|oklep"
+
+!message	T_POSITION		"pos.|poz." ???
+!message	T_REF_NORTH		"ref. north|topog.sever" ???
+!message	T_REFP1			"ref.point 1|tocka r1"
+!message	T_REFP2			"ref.point 2|tocka r2"
+!message	T_REFP3			"ref.point 3|tocka r3"
+!message	T_MEAS1			"measure 1|meritev r1"
+!message	T_MEAS2			"measure 2|meritev r2"
+!message	T_MEAS3			"measure 3|meritev r3"
+!message	T_BEAR1			"bearing to 1|smer v r1"
+!message	T_BEAR2			"bearing to 2|smer v r2"
+!message	T_BEAR3			"bearing to 3|smer v r3"
+!message	T_ESTIMATED		"est.position|izr.pozicija" ???
+!message	T_PITCH_ROLL	"pitch  roll|vzd. prec."
+!message	T_LEVEL_ON		"enabled|vklop"
+!message	T_LEVEL_OFF		"disabled|izklop"
+!message	T_PASSW			"password|geslo"
+!message	T_FMODE_0		" | po "
+!message	T_FMODE_1		" ..| po .."
+
+!message	GUN_BATTERY		"battery|baterija"
+!message	GUN_PLT1		"sect. 1|1. vod"
+!message	GUN_PLT2		"sect. 2|2. vod"
+!message	GUN_REFNO		"ref.|osnovno" ???
+
+!message	COMM_MESSAGE	"message|prenos" ???
+!message	GUN_MESS		"gun|orozje"
+!message	METEO_MESSAGE	"meteo|meteo" ???
+
+!message	MESS_DEST		"to|nasl"
+!message	MESS_SOURCE		"from|od"
+
+!message	TRAJ_HIGH		"HIGH|VISOKA"
+!message	TRAJ_LOW		"LOW|NIZKA"
+
+!message	EFF_DESTROY		"destroy|unici"
+!message	EFF_NEUTRALIZE	"neutralize|nevtr."
+!message	EFF_SMOKE		"smoke|dimno"
+!message	EFF_ILLUMINATE	"illuminate|osvetl."
+
+!message	FIRE_HOLD		"HOLD|PRIPRAVI"
+!message	FIRE_IMM		"FIRE|OGENJ"
+!message	FIRE_WHEN_READY	"WHEN READY|TAKOJ"
+
+!message	MESS_UNDEF		"...|..."
+!message	MESS_PEND		"pending|odposlan"
+!message	MESS_ACK		"ready|potrdi"
+!message	MESS_NACK		"not ready|zavrni"
+!message	MESS_ABORT		"aborted|prekini"
+
+!message	MONTH_1			"jan|jan"
+!message	MONTH_2			"feb|feb"
+!message	MONTH_3			"mar|mar"
+!message	MONTH_4			"apr|apr"
+!message	MONTH_5			"may|maj"
+!message	MONTH_6			"jun|jun"
+!message	MONTH_7			"jul|jul"
+!message	MONTH_8			"aug|avg"
+!message	MONTH_9			"sep|sep"
+!message	MONTH_10		"oct|okt"
+!message	MONTH_11		"nov|nov"
+!message	MONTH_12		"dec|dec"
+
+!message	DAY_1			"SU|NE"
+!message	DAY_2			"MO|PO"
+!message	DAY_3			"TU|TO"
+!message	DAY_4			"WE|SR"
+!message	DAY_5			"TH|CE"
+!message	DAY_6			"FR|PE"
+!message	DAY_7			"SA|SO"
+
+!message	TYPE_OP			"OP|OP"
+!message	TYPE_CO			"CO|CO"
+!message	TYPE_BT			"BT|BT"
+!message	TYPE_TG			"TG|TG"
+!message	TYPE_MT			"MT|MT"
+!message	TYPE_CR			"CR|CR"
+!message	TYPE_RP			"RP|RP"
+
+!message	KEY_NUMERIC		"0/1/2/3/4/5/6/7/8/9|0/1/2/3/4/5/6/7/8/9"
+!message	KEY_ALPHA0		".+-/ABC/DEF/GHI/JKL/MNO/PQR/STU/VWX/YZ |.+-/ABC/DEF/GHI/JKL/MNO/PQR/STU/VWX/YZ "
+!message	KEY_ALPHA1		".+-/abc/def/ghi/jkl/mno/pqr/stu/vwx/yz |.+-/abc/def/ghi/jkl/mno/pqr/stu/vwx/yz "
+!message	KEY_ALPHA2		""
+!message	KEY_ALPHA3		""
+
+!message	M_METER			"m|m"
+!message	M_HOUR			"h|h"
+!message	M_SECOND		"s|s"
+!message	M_AZIMUTH		"azimuth|os.smer"
+!message	M_BEARING		"bearing|kotomer"
+!message	M_ROUNDS		"rounds|strel."
+!message	ABBRV_NORTH		"N|S"
+!message	ABBRV_SOUTH		"S|J"
+!message	ABBRV_EAST		"E|V"
+!message	ABBRV_WEST		"W|Z"
